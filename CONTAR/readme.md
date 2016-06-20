@@ -19,4 +19,4 @@ Ejecutar el siguiente código con mpirun, y el número de procesadores a usar:
 Uso: mpirun -np <numero_de_procesadores> contar_paralelo <tamaño_vector>
 ```
 
-Se puede integrar también la opción -hostname <fichero> para establecer diferentes máquinas
+Se puede integrar también la opción `-hostname <fichero>` para establecer diferentes máquinas
