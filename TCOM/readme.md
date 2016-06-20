@@ -26,10 +26,10 @@ Uso: mpirun -hostfile <fichero_hosts> tcom
 Los parametros β y τ indican respectivamente la latencia necesaria para el envío de un mensaje y el tiempo necesario para enviar un byte.
 
 ``
-T com = β + τ · Tam_Mensaje
+T_com = β + τ · Tam_Mensaje
 ``
 
 Lo parametros se pueden estimar de la siguiente forma:
-*El valor de β sera el tiempo necesario en enviar un mensaje sin datos.
-*El valor de τ sera el tiempo requerido para enviar un mensaje menos el tiempo de latencia, dividido por el numero de bytes del mensaje.
+* El valor de `β` sera el tiempo necesario en enviar un mensaje sin datos.
+* El valor de `τ` sera el tiempo requerido para enviar un mensaje menos el tiempo de latencia, dividido por el numero de bytes del mensaje.
 
