@@ -1,0 +1,361 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <string.h>
+#include <malloc.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/times.h>
+#include <unistd.h>
+#include <mpi.h>
+#define TRUE 1
+#define FALSE 0
+
+#define nmax 1000
+
+float **Crear_matriz_pesos_consecutivo(int, int);
+int **Crear_matriz_caminos_consecutivo(int, int);
+int isNumber(char *);
+double ctimer(void);
+void printMatrizCaminos(int **, int, int);
+void printMatrizPesos(float **, int, int);
+void calcula_camino(float **, int **, int);
+void Definir_Grafo(int, float **, int **);
+
+static int nclock;
+
+double ctimer(void) {
+	struct timeval tp;
+	struct timezone tzp;
+	double diff;
+	nclock=sysconf(_SC_CLK_TCK);
+	gettimeofday(&tp, &tzp);
+	diff=(double)tp.tv_sec+(double)tp.tv_usec/1.0e6;
+	return diff;
+}
+
+int main(int argc, char *argv[]) {
+
+
+	int asignacionHijos, numVertices=5, restoProceso=0, inicioEnvios;
+	int filaAbj, procesoActual=0, finEnvios, contadorFilas, totalElementosEnv, c;
+
+    ///Variables mpi
+	MPI_Status estado;
+    int idProceso, totalProcesos;
+	MPI_Init(&argc, &argv);
+	MPI_Comm_size(MPI_COMM_WORLD,&totalProcesos);
+	MPI_Comm_rank(MPI_COMM_WORLD,&idProceso);
+
+	float **matrizPesos;
+	 //En las diapositivas de teoría es aux
+
+	int **matrizCaminos;	
+	 //En las diapositivas de teoría es auxC
+
+    if (argc > 1) { //Si existe el parámetro de numero de vertices, se lo asignamos, en caso contrario es 10 
+        if(isNumber(argv[1])){
+            numVertices=atoi(argv[1]);
+        }else{
+            MPI_Finalize();
+            exit(0);
+        }
+    }   
+
+    if (numVertices > nmax) {
+        printf("El numero de vertices (%d) sobrepasa el maximo (%d)\n",numVertices,nmax);
+        MPI_Finalize();
+        exit(-1);
+    }       
+    
+    float vectorPesos[numVertices]; //En las diapositivas de teoría es aux
+    int vectorCaminos[numVertices]; //En las diapositivas de teoría es auxC
+
+    if(idProceso==0){
+        asignacionHijos= numVertices/totalProcesos; //Repartimos el numero de filas entre el número total de procesos
+        restoProceso= numVertices%totalProcesos; //El sobrante se lo damos al padre
+        contadorFilas =restoProceso; //Establecemos el contador en el primer segmento
+        inicioEnvios = asignacionHijos + restoProceso;
+        filaAbj=0; //No tiene fila inferior
+        finEnvios = inicioEnvios; 
+        c=numVertices; 
+    }else{
+        asignacionHijos= numVertices/totalProcesos; 
+        restoProceso= numVertices%totalProcesos; 
+        contadorFilas = 0;
+        inicioEnvios = asignacionHijos +restoProceso; 
+        filaAbj = restoProceso + asignacionHijos*idProceso; 
+        finEnvios = asignacionHijos; 
+        c=asignacionHijos;
+    }
+
+    //Definimos las matrices de peso y caminos. Y se define el grago exácfinEnviosente igual que la parte secuencial
+    matrizPesos = Crear_matriz_pesos_consecutivo(c, numVertices);
+    matrizCaminos = Crear_matriz_caminos_consecutivo(c, numVertices);
+    //Total de elementos a enviar de la matriz. Hay que tener en cuenta que las filas en memoria, se almacenan de manera continua, como su fuera un vector
+    totalElementosEnv=numVertices*asignacionHijos;
+
+    //Si es el padre, envía sus filas e ignora la cantidad de elementos y el tipo que recibe (el recvcant y el type)
+    if(idProceso==0){
+        Definir_Grafo(c,matrizPesos,matrizCaminos);
+        MPI_Scatter(&matrizPesos[restoProceso][0], totalElementosEnv, MPI_FLOAT, MPI_IN_PLACE, totalElementosEnv, MPI_FLOAT,0,MPI_COMM_WORLD); 
+        MPI_Scatter(&matrizCaminos[restoProceso][0], totalElementosEnv, MPI_INT, MPI_IN_PLACE, totalElementosEnv, MPI_INT,0,MPI_COMM_WORLD);
+    }else{ //El hijo envía sus filas al resto de procesos y establece donde los va a recibir
+        MPI_Scatter(&matrizPesos[restoProceso][0], totalElementosEnv, MPI_FLOAT, &matrizPesos[contadorFilas][0], totalElementosEnv, MPI_FLOAT,0,MPI_COMM_WORLD); 
+        MPI_Scatter(&matrizCaminos[restoProceso][0], totalElementosEnv, MPI_INT, &matrizCaminos[contadorFilas][0], totalElementosEnv, MPI_INT,0,MPI_COMM_WORLD);
+    }
+
+
+
+	int i,k,j;
+    //En la iteración k, cada tarea, además de su fila, necesita los valores de la fila k de pesos y caminos. 
+    //Hay que buscar la tarea que tenga la fila y difundirlas con Bcast
+    //Empieza el algoritmo de FW
+	for (k=0; k<numVertices; k++) {
+		for (i=0;i<totalProcesos;i++){
+            //Buscamos el proceso que tiene la fila K para enviarsela al resto de procesos
+			if ((k >= (restoProceso + asignacionHijos*i) && (k<= inicioEnvios + asignacionHijos*i)))  {
+                procesoActual = i;
+            }
+		}
+
+        //Si soy yo el que tiene que enviar el proceso al resto de hijos
+        //Creo el vector con mi fila
+		if (idProceso == procesoActual) {
+			for (i=0;i<numVertices;i++) {
+				vectorPesos[i] = matrizPesos[k-filaAbj][i];
+				vectorCaminos[i]=matrizCaminos[k-filaAbj][i];
+			}
+		}
+        
+        //Se envían los vectores al resto de procesos
+		MPI_Bcast(&vectorPesos[0],numVertices,MPI_FLOAT,procesoActual,MPI_COMM_WORLD);
+		MPI_Bcast(&vectorCaminos[0],numVertices,MPI_INT,procesoActual,MPI_COMM_WORLD);
+
+        //En las lineas filas del proceso, recorremos todas las columnas
+		for (i = 0; i < finEnvios; i++) {
+			for (j = 0; j < numVertices; j++) {
+                //Y si no existe camino, hacemos la comprobación de que sea menor Y QUE NO SEA INFINITO
+				if ((matrizPesos[i][k] * vectorPesos[j] != 0) )  {
+					if ((matrizPesos[i][k] + vectorPesos[j] < matrizPesos[i][j]) || (matrizPesos[i][j] == 0)){
+						matrizPesos[i][j] = matrizPesos[i][k] + vectorPesos[j];
+						matrizCaminos[i][j]=vectorCaminos[j];
+					}
+				}
+			}
+		}
+
+        //Total de elementos a enviar de la matriz. Hay que tener en cuenta que las filas en memoria, se almacenan de manera continua, como su fuera un vector
+        totalElementosEnv=numVertices*asignacionHijos;
+		if (idProceso == 0) { //El padre envía y recibe los mismos datos, así que con MPI_IN_PLACE ignoramos la cantidad y el tipo
+			MPI_Gather(MPI_IN_PLACE, totalElementosEnv, MPI_FLOAT, &matrizPesos[contadorFilas][0], totalElementosEnv, MPI_FLOAT, 0, MPI_COMM_WORLD);
+			MPI_Gather(MPI_IN_PLACE, totalElementosEnv, MPI_INT, &matrizCaminos[contadorFilas][0], totalElementosEnv, MPI_INT, 0, MPI_COMM_WORLD);
+            
+            if (numVertices <= 10) {
+                printMatrizPesos(matrizPesos,numVertices,numVertices);
+                printMatrizCaminos(matrizCaminos,numVertices,numVertices);
+            }
+            //Calculamos el camino
+            calcula_camino(matrizPesos, matrizCaminos, numVertices); 
+
+		}else{  //Si es un proceso hijo, enviamos al padre el número de elementos calculados
+            MPI_Gather(&matrizPesos[contadorFilas][0], totalElementosEnv, MPI_FLOAT, &matrizPesos[contadorFilas][0], totalElementosEnv, MPI_FLOAT, 0, MPI_COMM_WORLD);
+            MPI_Gather(&matrizCaminos[contadorFilas][0], totalElementosEnv, MPI_INT, &matrizCaminos[contadorFilas][0], totalElementosEnv, MPI_INT, 0, MPI_COMM_WORLD);
+        
+        }
+
+	}
+    free(matrizPesos);
+    free(matrizCaminos);
+    MPI_Finalize();
+
+
+}
+	
+void Definir_Grafo(int n,float **dist,int **caminos)
+{
+// Inicializamos la matriz de pesos y la de caminos para el algoritmos de Floyd-Warshall. 
+// Un 0 en la matriz de pesos indica que no hay arco.
+// Para la matriz de caminos se supone que los vertices se numeran de 1 a n.
+  int i,j;
+  for (i = 0; i < n; ++i) {
+      for (j = 0; j < n; ++j) {
+          if (i==j)
+             dist[i][j]=0;
+          else {
+             dist[i][j]= (11.0 * rand() / ( RAND_MAX + 1.0 )); // aleatorios 0 <= dist < 11
+             dist[i][j] = ((double)((int)(dist[i][j]*10)))/10; // truncamos a 1 decimal
+             if (dist[i][j] < 2) dist[i][j]=0; // establecemos algunos a 0 
+          }
+          if (dist[i][j] != 0)
+             caminos[i][j] = i+1;
+          else
+             caminos[i][j] = 0;
+      }
+  }
+}
+
+void calcula_camino(float **a, int **b, int n)
+{
+ int i,count=2, count2;
+ int anterior; 
+ int *camino;
+ int inicio=-1, fin=-1;
+
+ while ((inicio < 0) || (inicio >n) || (fin < 0) || (fin > n)) {
+    printf("Vertices inicio y final: (0 0 para salir) ");
+    scanf("%d %d",&inicio, &fin);
+ }
+ while ((inicio != 0) && (fin != 0)) {
+    anterior = fin;
+    while (b[inicio-1][anterior-1] != inicio) {
+       anterior = b[inicio-1][anterior-1];
+       count = count + 1;
+    }
+    count2 = count;
+    camino = malloc(count * sizeof(int));
+    anterior = fin;
+    camino[count-1]=fin;
+    while (b[inicio-1][anterior-1] != inicio) {
+       anterior = b[inicio-1][anterior-1];
+       count = count - 1;
+       camino[count-1]=anterior;
+    }
+    camino[0] = inicio;
+    printf("\nCamino mas corto de %d a %d:\n", inicio, fin);
+    printf("          Peso: %5.1f\n", a[inicio-1][fin-1]);
+    printf("        Camino: ");
+    for (i=0; i<count2; i++) printf("%d ",camino[i]);
+    printf("\n");
+    free(camino);
+    inicio = -1;
+    while ((inicio < 0) || (inicio >n) || (fin < 0) || (fin > n)) {
+       printf("Vertices inicio y final: (0 0 para salir) ");
+       scanf("%d %d",&inicio, &fin);
+    }
+
+ }
+}
+
+
+float **Crear_matriz_pesos_consecutivo(int Filas, int Columnas)
+{
+// crea un array de 2 dimensiones en posiciones contiguas de memoria
+ float *mem_matriz;
+ float **matriz;
+ int fila, col;
+ if (Filas <=0) 
+    {
+        printf("El numero de filas debe ser mayor que cero\n");
+        return;
+    }
+ if (Columnas <= 0)
+    {
+        printf("El numero de filas debe ser mayor que cero\n");
+        return;
+    }
+ mem_matriz = malloc(Filas * Columnas * sizeof(float));
+ if (mem_matriz == NULL) 
+    {
+        printf("Insuficiente espacio de memoria\n");
+        return;
+    }
+ matriz = malloc(Filas * sizeof(float *));
+ if (matriz == NULL) 
+    {
+        printf ("Insuficiente espacio de memoria\n");
+        return;
+    }
+ for (fila=0; fila<Filas; fila++)
+    matriz[fila] = mem_matriz + (fila*Columnas);
+ return matriz;
+}
+
+int **Crear_matriz_caminos_consecutivo(int Filas, int Columnas)
+{
+// crea un array de 2 dimensiones en posiciones contiguas de memoria
+ int *mem_matriz;
+ int **matriz;
+ int fila, col;
+ if (Filas <=0) 
+    {
+        printf("El numero de filas debe ser mayor que cero\n");
+        return;
+    }
+ if (Columnas <= 0)
+    {
+        printf("El numero de filas debe ser mayor que cero\n");
+        return;
+    }
+ mem_matriz = malloc(Filas * Columnas * sizeof(int));
+ if (mem_matriz == NULL) 
+    {
+        printf("Insuficiente espacio de memoria\n");
+        return;
+    }
+ matriz = malloc(Filas * sizeof(int *));
+ if (matriz == NULL) 
+    {
+        printf ("Insuficiente espacio de memoria\n");
+        return;
+    }
+ for (fila=0; fila<Filas; fila++)
+    matriz[fila] = mem_matriz + (fila*Columnas);
+ return matriz;
+}
+
+void printMatrizCaminos(int **a, int fila, int col) {
+        int i, j;
+        char buffer[10];
+        printf("     ");
+        for (i = 0; i < col; ++i){
+                j=sprintf(buffer, "%c%d",'V',i+1 );
+                printf("%5s", buffer);
+       }
+        printf("\n");
+        for (i = 0; i < fila; ++i) {
+                j=sprintf(buffer, "%c%d",'V',i+1 );
+                printf("%5s", buffer);
+                for (j = 0; j < col; ++j)
+                        printf("%5d", a[i][j]);
+                printf("\n");
+        }
+        printf("\n");
+}
+
+void printMatrizPesos(float **a, int fila, int col) {
+        int i, j;
+        char buffer[10];
+        printf("     ");
+        for (i = 0; i < col; ++i){
+                j=sprintf(buffer, "%c%d",'V',i+1 );
+                printf("%5s", buffer);
+       }
+        printf("\n");
+        for (i = 0; i < fila; ++i) {
+                j=sprintf(buffer, "%c%d",'V',i+1 );
+                printf("%5s", buffer);
+                for (j = 0; j < col; ++j)
+                        printf("%5.1f", a[i][j]);
+                printf("\n");
+        }
+        printf("\n");
+}
+
+
+
+/** isNumber: Comprueba si la cadena de carácteres pasada por parámetro es un número
+*  return bool
+**/
+int isNumber(char *numeroEntrada) {
+	int i;
+	size_t finEnviosanyoVector = strlen(numeroEntrada);
+	int correcto=TRUE;
+
+	for (i = 0; i < finEnviosanyoVector && correcto; i++) {
+		if (!isdigit(numeroEntrada[i])) {
+			correcto=FALSE;
+		}
+	}
+	return correcto;
+}
