@@ -62,7 +62,7 @@ main(int argc, char **argv) {
 			vervector(vector, numColumnas, "x");
 		}
 
-		//HAcemos la subdivision igual que en la práctica CONTAR
+		//Hacemos la subdivision igual que en la práctica CONTAR
 		filas_por_proceso=numFilas/totalProcesos;
 		filas_padre=auxPosicion=filas_por_proceso+(numFilas%totalProcesos); 
 
@@ -117,12 +117,14 @@ main(int argc, char **argv) {
 
 void vermatriz(int lda, double a[][lda], int m, int n, char nombre[]) {
 	int i,j;
-	printf("%4s =",nombre);
-	printf("%6d ",0);
+	printf("%4s =", nombre);
+	printf("%6d ", 0);
 	for (j=1;j<n;j++){
 		printf("%7d ",j);
 	}
+
 	printf("\n");
+
 	for (i=0;i<m;i++){
 		printf("%8d:",i);
 		for (j=0;j<n;j++){
@@ -137,7 +139,9 @@ void vervector(double a[], int m, char nombre[]) {
 	printf("%6s = ",nombre);
 	for (i=0;i<m;i++){
 		printf("%7.3f ",a[i]);
-		if ((i+1)%5  == 0) printf("\n         ");
+		if ((i+1)%5  == 0) {
+			printf("\n\t\t");
+		}
 	}
 	printf("\n"); 
 }
